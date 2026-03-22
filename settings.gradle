@@ -1,0 +1,12 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven {
+            name = "Forge"
+            url = "https://maven.minecraftforge.net/"
+        }
+        mavenCentral()
+    }
+}
+
+rootProject.name = "Fast_Travel_Waypoints"
