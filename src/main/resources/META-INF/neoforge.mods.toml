@@ -1,11 +1,11 @@
 modLoader="javafml"
-loaderVersion="[47,)"
+loaderVersion="[1,)"
 license="MIT"
 issueTrackerURL=""
 
 [[mods]]
   modId="fast_travel_waypoints"
-  version="1.1.0"
+  version="1.2.0"
   displayName="Fast Travel Waypoints"
   displayURL=""
   logoFile="logo.png"
@@ -16,37 +16,37 @@ issueTrackerURL=""
   '''
 
 [[dependencies.fast_travel_waypoints]]
-  modId="forge"
-  mandatory=true
-  versionRange="[47,)"
+  modId="neoforge"
+  type="required"
+  versionRange="[21,)"
   ordering="NONE"
   side="BOTH"
 
 [[dependencies.fast_travel_waypoints]]
   modId="minecraft"
-  mandatory=true
-  versionRange="[1.20.1,1.21)"
+  type="required"
+  versionRange="[1.21,1.21.2)"
   ordering="NONE"
   side="BOTH"
 
 # Client-side required dependencies (Xaero integration)
 [[dependencies.fast_travel_waypoints]]
   modId="xaeroworldmap"
-  mandatory=true
+  type="required"
   versionRange="[0,)"
   ordering="NONE"
   side="CLIENT"
 
 [[dependencies.fast_travel_waypoints]]
   modId="xaerolib"
-  mandatory=true
+  type="required"
   versionRange="[0,)"
   ordering="NONE"
   side="CLIENT"
 
 [[dependencies.fast_travel_waypoints]]
   modId="xmxw"
-  mandatory=true
+  type="required"
   versionRange="[0,)"
   ordering="NONE"
   side="CLIENT"
@@ -54,7 +54,7 @@ issueTrackerURL=""
 # Required: Waystones provides the actual blocks/teleport targets used by this mod.
 [[dependencies.fast_travel_waypoints]]
   modId="waystones"
-  mandatory=true
+  type="required"
   versionRange="[0,)"
   ordering="NONE"
   side="BOTH"

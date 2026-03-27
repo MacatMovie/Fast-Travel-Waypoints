@@ -1,12 +1,13 @@
 pluginManagement {
     repositories {
         gradlePluginPortal()
-        maven {
-            name = "Forge"
-            url = "https://maven.minecraftforge.net/"
-        }
         mavenCentral()
+        maven { url = uri('https://maven.neoforged.net/releases') }
     }
 }
 
-rootProject.name = "Fast_Travel_Waypoints"
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+rootProject.name = 'fast_travel_waypoints_neoforge_1211'

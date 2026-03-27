@@ -7,16 +7,17 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
-import net.minecraftforge.event.entity.player.PlayerInteractEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-@Mod.EventBusSubscriber(modid = "fast_travel_waypoints")
+@EventBusSubscriber(modid = "fast_travel_waypoints")
 public class WaystoneHintEvents {
 
     private static final String WAYSTONES_NS = "waystones";
@@ -47,7 +48,7 @@ public class WaystoneHintEvents {
         if (player == null) return;
 
         BlockState state = level.getBlockState(event.getPos());
-        ResourceLocation rl = ForgeRegistries.BLOCKS.getKey(state.getBlock());
+        ResourceLocation rl = BuiltInRegistries.BLOCK.getKey(state.getBlock());
         if (rl == null) return;
 
         if (WAYSTONES_NS.equals(rl.getNamespace()) && rl.getPath().contains("waystone")) {
@@ -66,7 +67,7 @@ public class WaystoneHintEvents {
         if (player == null) return;
 
         ItemStack stack = event.getItemStack();
-        ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        ResourceLocation rl = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (rl == null) return;
 
         if (WAYSTONES_NS.equals(rl.getNamespace())
