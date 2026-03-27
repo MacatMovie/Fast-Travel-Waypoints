@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "fast_travel_waypoints",
+  "version": "1.2.0",
+  "name": "Fast Travel Waypoints",
+  "description": "Adds fast traveling to waystones via Xaero's world map instead of using long cluttered destination lists. It also includes some sound & visual effects. Condition customization is available in the config files.",
+  "authors": ["macat"],
+  "license": "All Rights Reserved",
+  "icon": "logo.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.macat.waystonemap.WaystoneMapTpMod"],
+    "client": ["com.macat.waystonemap.WaystoneMapTpClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.17.3",
+    "fabric-api": "*",
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "waystones": ">=21.1.29",
+    "xaeroworldmap": ">=1.40.11",
+    "xmxw": ">=2.7.4"
+  }
+}
