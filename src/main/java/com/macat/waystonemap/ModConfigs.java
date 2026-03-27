@@ -18,6 +18,9 @@ public final class ModConfigs {
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> OPEN_SKY_DIMENSION_WHITELIST;
     public static final ForgeConfigSpec.BooleanValue ENABLE_MIN_Y_CHECK;
     public static final ForgeConfigSpec.IntValue MIN_Y;
+    public static final ForgeConfigSpec.BooleanValue REQUIRE_NEARBY_WAYSTONE_FOR_USE;
+    public static final ForgeConfigSpec.IntValue NEARBY_WAYSTONE_USE_RADIUS;
+    public static final ForgeConfigSpec.BooleanValue REPLACE_WAYSTONE_SCREEN_WITH_WORLD_MAP;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -28,9 +31,22 @@ public final class ModConfigs {
                 .comment("How many XP levels are consumed when a player fast-travels to a waystone waypoint. 0 = free.")
                 .defineInRange("level_cost", 0, 0, 1000);
 
+        REQUIRE_NEARBY_WAYSTONE_FOR_USE = b
+                .comment("If true, players must be near any Waystone before they can start fast travel from the world map.")
+                .define("require_nearby_waystone_for_use", false);
+
+        NEARBY_WAYSTONE_USE_RADIUS = b
+                .comment("How close the player must be to any Waystone to start fast travel when require_nearby_waystone_for_use=true. Measured in blocks. Default: 5")
+                .defineInRange("nearby_waystone_use_radius", 5, 1, 64);
+
+        REPLACE_WAYSTONE_SCREEN_WITH_WORLD_MAP = b
+                .comment("If true, right-clicking an already-activated Waystone opens Xaero's World Map instead of the default Waystone destination list. Sneak-right-click still opens Waystone settings.")
+                .define("replace_waystone_screen_with_world_map", true);
+
         REQUIRE_OPEN_SKY_PLAYER = b
                 .comment("If true, players can only fast-travel when they have open sky above them (ignores leaves, fluids, and transparent blocks like glass). Checked at the player position.")
                 .define("require_open_sky_player", false);
+
         REQUIRE_OPEN_SKY_DESTINATION = b
                 .comment("If true, players can only fast-travel to waystones that have open sky above the destination area. Uses the same open_sky_dimension_whitelist as require_open_sky_player.")
                 .define("require_open_sky_destination", false);
@@ -52,12 +68,11 @@ public final class ModConfigs {
         SPEC = b.build();
     }
 
-    
     public static boolean requireOpenSkyPlayer() {
         return REQUIRE_OPEN_SKY_PLAYER.get();
     }
 
-public static void register() {
+    public static void register() {
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SPEC);
     }
 }

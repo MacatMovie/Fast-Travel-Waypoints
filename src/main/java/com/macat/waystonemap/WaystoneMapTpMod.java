@@ -22,6 +22,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.sounds.SoundEvent;
@@ -33,6 +35,7 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Optional;
@@ -40,6 +43,7 @@ import java.util.UUID;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 
 @Mod("fast_travel_waypoints")
 public class WaystoneMapTpMod {
@@ -52,6 +56,37 @@ public class WaystoneMapTpMod {
     public WaystoneMapTpMod() {
         ModConfigs.register();
         MinecraftForge.EVENT_BUS.register(this);
+    }
+
+    @SubscribeEvent
+    public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (!ModConfigs.REPLACE_WAYSTONE_SCREEN_WITH_WORLD_MAP.get()) return;
+        if (event.getHand() != net.minecraft.world.InteractionHand.MAIN_HAND) return;
+        Player player = event.getEntity();
+        if (player.isShiftKeyDown()) return;
+
+        Level level = event.getLevel();
+        BlockPos pos = event.getPos();
+        if (!isWaystoneBlock(level, pos)) return;
+
+        if (isLikelyBoundScroll(player.getMainHandItem())) return;
+        if (!isWaystoneActivatedForPlayer(player, level, pos)) return;
+
+        event.setCanceled(true);
+        event.setCancellationResult(InteractionResult.SUCCESS);
+
+        level.playSound(player, pos, ForgeRegistries.SOUND_EVENTS.getValue(new ResourceLocation("minecraft:block.end_portal_frame.fill")), SoundSource.BLOCKS, 0.85f, 1.0f);
+
+        if (level.isClientSide) {
+            invokeClientHook("tryOpenXaeroWorldMap");
+        }
+    }
+
+
+    @SubscribeEvent
+    public void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        invokeClientHook("releasePendingWorldMapKey");
     }
 
     @SubscribeEvent
@@ -153,6 +188,17 @@ public class WaystoneMapTpMod {
         // Creative always bypasses restrictions (and also bypasses the countdown).
         if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR) return true;
 
+        if (ModConfigs.REQUIRE_NEARBY_WAYSTONE_FOR_USE.get()) {
+            int radius = ModConfigs.NEARBY_WAYSTONE_USE_RADIUS.get();
+            if (!isPlayerNearAnyWaystone(level, player.blockPosition(), radius)) {
+                player.displayClientMessage(
+                        Component.literal("You must be within " + radius + " blocks of a Waystone to fast travel.").withStyle(ChatFormatting.RED),
+                        true
+                );
+                return false;
+            }
+        }
+
         // Open sky requirement (ignores leaves + transparent blocks like glass). Checked from the player's upper body (1 block above feet).
         if (ModConfigs.requireOpenSkyPlayer() && isOpenSkyCheckEnabledInThisDimension(level)) {
             BlockPos pos = player.blockPosition().above();
@@ -217,6 +263,36 @@ public class WaystoneMapTpMod {
             }
         }
         return true;
+    }
+
+    private boolean isPlayerNearAnyWaystone(ServerLevel level, BlockPos playerPos, int radius) {
+        int minY = Math.max(level.getMinBuildHeight(), playerPos.getY() - Math.min(radius, 4));
+        int maxY = Math.min(level.getMaxBuildHeight() - 1, playerPos.getY() + Math.min(radius, 4));
+        int radiusSq = radius * radius;
+
+        for (int y = minY; y <= maxY; y++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if ((dx * dx) + (dz * dz) > radiusSq) continue;
+
+                    BlockPos checkPos = new BlockPos(playerPos.getX() + dx, y, playerPos.getZ() + dz);
+                    if (!isWaystoneBlock(level, checkPos)) continue;
+
+                    BlockPos bottom = checkPos;
+                    while (isWaystoneBlock(level, bottom.below())) {
+                        bottom = bottom.below();
+                    }
+
+                    Vec3 playerCenter = new Vec3(playerPos.getX() + 0.5D, playerPos.getY() + 0.5D, playerPos.getZ() + 0.5D);
+                    Vec3 waystoneCenter = new Vec3(bottom.getX() + 0.5D, bottom.getY() + 0.5D, bottom.getZ() + 0.5D);
+                    if (playerCenter.distanceToSqr(waystoneCenter) <= radiusSq) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private boolean isOpenSkyCheckEnabledInThisDimension(ServerLevel level) {
@@ -426,14 +502,13 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
     }
 
     private void sendCountdownTitle(ServerPlayer player, String waystoneName, int seconds) {
-        MutableComponent base = Component.literal("Teleporting to ").withStyle(ChatFormatting.WHITE);
-        MutableComponent name = Component.literal(waystoneName).withStyle(ChatFormatting.YELLOW);
-        MutableComponent tail = Component.literal(" in " + seconds + "s").withStyle(ChatFormatting.WHITE);
-        Component title = base.append(name).append(tail);
+        Component title = Component.literal(waystoneName).withStyle(ChatFormatting.YELLOW);
+        Component subtitle = Component.literal("Teleporting in " + seconds + "s").withStyle(ChatFormatting.WHITE);
 
         // 0 fade-in, short stay, soft fade-out. Each second replaces previous.
         player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket(0, 18, 10));
         player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket(title));
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket(subtitle));
     }
 
     private void playSoftNote(ServerPlayer player) {
@@ -491,6 +566,48 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
         }
 
         return fallback;
+    }
+
+    private void invokeClientHook(String methodName) {
+        try {
+            Class<?> clientHooksClass = Class.forName("com.macat.waystonemap.ClientHooks");
+            clientHooksClass.getMethod(methodName).invoke(null);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private boolean isLikelyBoundScroll(net.minecraft.world.item.ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (rl == null) return false;
+        return "waystones".equals(rl.getNamespace()) && rl.getPath().contains("bound_scroll");
+    }
+
+    private boolean isWaystoneActivatedForPlayer(Player player, Level level, BlockPos pos) {
+        try {
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (blockEntity == null && isWaystoneBlock(level, pos.below())) {
+                blockEntity = level.getBlockEntity(pos.below());
+            }
+            if (blockEntity == null) return false;
+
+            Method getWaystone = blockEntity.getClass().getMethod("getWaystone");
+            Object waystone = getWaystone.invoke(blockEntity);
+            if (waystone == null) return false;
+
+            Class<?> managerClass = Class.forName("net.blay09.mods.waystones.core.PlayerWaystoneManager");
+            for (Method method : managerClass.getMethods()) {
+                if (!method.getName().equals("isWaystoneActivated")) continue;
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length == 2 && params[0].isAssignableFrom(player.getClass()) && params[1].isInstance(waystone)) {
+                    Object result = method.invoke(null, player, waystone);
+                    if (result instanceof Boolean b) return b;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return false;
     }
 
     private static class PendingTeleport {
