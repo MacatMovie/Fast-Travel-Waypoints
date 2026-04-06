@@ -22,7 +22,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.sounds.SoundSource;
@@ -36,7 +35,6 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.Optional;
@@ -58,31 +56,6 @@ public class WaystoneMapTpMod {
         ModConfigs.register();
         NeoForge.EVENT_BUS.register(this);
     }
-
-    @SubscribeEvent
-    public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
-        if (!ModConfigs.REPLACE_WAYSTONE_SCREEN_WITH_WORLD_MAP.get()) return;
-        if (event.getHand() != net.minecraft.world.InteractionHand.MAIN_HAND) return;
-        Player player = event.getEntity();
-        if (player.isShiftKeyDown()) return;
-
-        Level level = event.getLevel();
-        BlockPos pos = event.getPos();
-        if (!isWaystoneBlock(level, pos)) return;
-
-        if (isLikelyBoundScroll(player.getMainHandItem())) return;
-        if (!isWaystoneActivatedForPlayer(player, level, pos)) return;
-
-        event.setCanceled(true);
-        event.setCancellationResult(InteractionResult.SUCCESS);
-
-        level.playSound(player, pos, BuiltInRegistries.SOUND_EVENT.get(ResourceLocation.parse("minecraft:block.end_portal_frame.fill")), SoundSource.BLOCKS, 0.85f, 1.0f);
-
-        if (level.isClientSide) {
-            invokeClientHook("tryOpenXaeroWorldMap");
-        }
-    }
-
 
     @SubscribeEvent
     public void onClientTick(ClientTickEvent.Post event) {
@@ -353,6 +326,24 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
                 .withStyle(net.minecraft.ChatFormatting.RED), true);
     }
 
+    private boolean shouldSkipCountdown(ServerPlayer player) {
+        if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR) {
+            return true;
+        }
+
+        int radius = ModConfigs.NEARBY_WAYSTONE_USE_RADIUS.get();
+        boolean nearWaystone = isPlayerNearAnyWaystone(player.serverLevel(), player.blockPosition(), radius);
+        if (nearWaystone) {
+            return ModConfigs.DISABLE_COUNTDOWN_WHEN_NEAR_A_WAYSTONE.get();
+        }
+        return ModConfigs.DISABLE_COUNTDOWN_FOR_TELEPORTING_FROM_ANYWHERE.get();
+    }
+
+    private void completeTeleportWithFx(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact) {
+        safeTeleportToWaystoneNow(player, level, waystoneBottom, fallbackExact);
+        POST_FX.put(player.getUUID(), new PostTeleportFx(4));
+    }
+
     private void startWaystoneTeleportCountdown(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact, String waypointName) {
         // If the required client-side mods are missing, don't start a countdown
         // (but still allow the server-side teleport logic to run, so the mod remains usable).
@@ -381,18 +372,12 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
         }
 
 
-        // Creative mode should skip the whole countdown: instant teleport.
-        if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE) {
-            // Small poof at the origin.
+        if (shouldSkipCountdown(player)) {
             ServerLevel pl = player.serverLevel();
             pl.sendParticles(ParticleTypes.POOF,
                     player.getX(), player.getY() + 0.2D, player.getZ(),
                     18, 0.35D, 0.2D, 0.35D, 0.01D);
-
-            // We already validated there is a safe spot; use it.
-            teleportPlayer(player, level, safeNow.get());
-            // After arriving, do portal particles + teleport sound a couple ticks later.
-            POST_FX.put(player.getUUID(), new PostTeleportFx(4));
+            completeTeleportWithFx(player, level, waystoneBottom, fallbackExact);
             return;
         }
 

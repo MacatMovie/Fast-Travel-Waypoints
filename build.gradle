@@ -4,7 +4,7 @@ plugins {
     id 'net.neoforged.moddev' version '1.0.11'
 }
 
-version = '1.2.0'
+version = '1.2.1'
 group = 'com.macat.waystonemap'
 
 base {
