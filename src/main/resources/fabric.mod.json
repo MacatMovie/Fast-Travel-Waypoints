@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "fast_travel_waypoints",
-  "version": "1.2.0",
+  "version": "${version}",
   "name": "Fast Travel Waypoints",
   "description": "Adds fast traveling to waystones via Xaero's world map instead of using long cluttered destination lists. It also includes some sound & visual effects. Condition customization is available in the config files.",
   "authors": ["macat"],
