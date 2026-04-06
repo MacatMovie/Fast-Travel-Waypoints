@@ -12,6 +12,7 @@ public final class ModConfigs {
 
     public static final ForgeConfigSpec SPEC;
 
+    public static final ForgeConfigSpec.IntValue CONFIG_VERSION;
     public static final ForgeConfigSpec.IntValue LEVEL_COST;
     public static final ForgeConfigSpec.BooleanValue REQUIRE_OPEN_SKY_PLAYER;
     public static final ForgeConfigSpec.BooleanValue REQUIRE_OPEN_SKY_DESTINATION;
@@ -20,12 +21,17 @@ public final class ModConfigs {
     public static final ForgeConfigSpec.IntValue MIN_Y;
     public static final ForgeConfigSpec.BooleanValue REQUIRE_NEARBY_WAYSTONE_FOR_USE;
     public static final ForgeConfigSpec.IntValue NEARBY_WAYSTONE_USE_RADIUS;
-    public static final ForgeConfigSpec.BooleanValue REPLACE_WAYSTONE_SCREEN_WITH_WORLD_MAP;
+    public static final ForgeConfigSpec.BooleanValue DISABLE_COUNTDOWN_WHEN_NEAR_A_WAYSTONE;
+    public static final ForgeConfigSpec.BooleanValue DISABLE_COUNTDOWN_FOR_TELEPORTING_FROM_ANYWHERE;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
 
         b.push("fast_travel");
+
+        CONFIG_VERSION = b
+                .comment("Internal config version used by the mod for future migrations. Current version: 2")
+                .defineInRange("config_version", 2, 1, Integer.MAX_VALUE);
 
         LEVEL_COST = b
                 .comment("How many XP levels are consumed when a player fast-travels to a waystone waypoint. 0 = free.")
@@ -33,15 +39,20 @@ public final class ModConfigs {
 
         REQUIRE_NEARBY_WAYSTONE_FOR_USE = b
                 .comment("If true, players must be near any Waystone before they can start fast travel from the world map.")
-                .define("require_nearby_waystone_for_use", false);
+                .define("require_nearby_waystone_for_use", true);
 
         NEARBY_WAYSTONE_USE_RADIUS = b
-                .comment("How close the player must be to any Waystone to start fast travel when require_nearby_waystone_for_use=true. Measured in blocks. Default: 5")
-                .defineInRange("nearby_waystone_use_radius", 5, 1, 64);
+                .comment("How close the player must be to any Waystone to start fast travel when require_nearby_waystone_for_use=true. Measured in blocks. Default: 7")
+                .defineInRange("nearby_waystone_use_radius", 7, 1, 64);
 
-        REPLACE_WAYSTONE_SCREEN_WITH_WORLD_MAP = b
-                .comment("If true, right-clicking an already-activated Waystone opens Xaero's World Map instead of the default Waystone destination list. Sneak-right-click still opens Waystone settings.")
-                .define("replace_waystone_screen_with_world_map", true);
+
+        DISABLE_COUNTDOWN_WHEN_NEAR_A_WAYSTONE = b
+                .comment("If true, remove the 3-second teleport countdown whenever the player is currently within nearby_waystone_use_radius blocks of any Waystone.")
+                .define("disable_countdown_when_near_a_waystone", true);
+
+        DISABLE_COUNTDOWN_FOR_TELEPORTING_FROM_ANYWHERE = b
+                .comment("If true, remove the 3-second teleport countdown for map teleports when the player is not currently within nearby_waystone_use_radius blocks of any Waystone.")
+                .define("disable_countdown_for_teleporting_from_anywhere", false);
 
         REQUIRE_OPEN_SKY_PLAYER = b
                 .comment("If true, players can only fast-travel when they have open sky above them (ignores leaves, fluids, and transparent blocks like glass). Checked at the player position.")
