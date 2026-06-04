@@ -11,13 +11,16 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -98,10 +101,58 @@ public class WaystoneMapTpMod implements ModInitializer {
                     )
                 )
         );
+
+        // Explicit cross-dimensional FTW command used by the client-side rewrite fallback.
+        dispatcher.register(
+            Commands.literal("wstpxd")
+                .requires(source -> source.getEntity() instanceof ServerPlayer)
+                .then(Commands.argument("dimension", ResourceLocationArgument.id())
+                    .then(Commands.argument("pos", Vec3Argument.vec3())
+                        .executes(ctx -> {
+                            CommandSourceStack source = ctx.getSource();
+                            if (!(source.getEntity() instanceof ServerPlayer player)) {
+                                source.sendFailure(Component.literal("This command can only be used by players."));
+                                return 0;
+                            }
+
+                            Vec3 vec = Vec3Argument.getVec3(ctx, "pos");
+                            ResourceLocation dimId = ResourceLocationArgument.getId(ctx, "dimension");
+                            String dim = dimId.toString();
+                            return handleTeleportInDimension(player, dim, vec, null);
+                        })
+                        .then(Commands.argument("name", StringArgumentType.greedyString())
+                            .executes(ctx -> {
+                                CommandSourceStack source = ctx.getSource();
+                                if (!(source.getEntity() instanceof ServerPlayer player)) {
+                                    source.sendFailure(Component.literal("This command can only be used by players."));
+                                    return 0;
+                                }
+
+                                Vec3 vec = Vec3Argument.getVec3(ctx, "pos");
+                                ResourceLocation dimId = ResourceLocationArgument.getId(ctx, "dimension");
+                            String dim = dimId.toString();
+                                String name = StringArgumentType.getString(ctx, "name");
+                                return handleTeleportInDimension(player, dim, vec, name);
+                            })
+                        )
+                    )
+                )
+        );
     }
 
-    private boolean canStartFastTravel(ServerPlayer player, ServerLevel level) {
-        // Creative always bypasses restrictions (and also bypasses the countdown).
+    private boolean canStartFastTravel(ServerPlayer player, ServerLevel targetLevel) {
+        ServerLevel level = player.serverLevel();
+        boolean crossDimensional = isCrossDimensionalFastTravel(player, targetLevel);
+
+        if (crossDimensional && !ModConfigs.ENABLE_CROSS_DIMENSIONAL_TRAVEL.get()) {
+            player.displayClientMessage(
+                    Component.literal("Cross-dimensional fast travel is disabled on this server.").withStyle(ChatFormatting.RED),
+                    true
+            );
+            return false;
+        }
+
+        // Creative/spectator bypass restrictions and XP costs, but not the server cross-dimensional travel toggle above.
         if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR) return true;
 
         if (ModConfigs.REQUIRE_NEARBY_WAYSTONE_FOR_USE.get()) {
@@ -115,7 +166,7 @@ public class WaystoneMapTpMod implements ModInitializer {
             }
         }
 
-        // Open sky requirement (ignores leaves + transparent blocks like glass). Checked from the player's upper body (1 block above feet).
+        // Open sky requirement is checked in the player's origin dimension.
         if (ModConfigs.requireOpenSkyPlayer() && isOpenSkyCheckEnabledInThisDimension(level)) {
             BlockPos pos = player.blockPosition().above();
             if (!canSeeSkyIgnoringLeaves(level, pos)) {
@@ -127,7 +178,7 @@ public class WaystoneMapTpMod implements ModInitializer {
             }
         }
 
-        // Min Y requirement
+        // Min Y requirement is checked at the player's current position.
         if (ModConfigs.ENABLE_MIN_Y_CHECK.get()) {
             int minY = ModConfigs.MIN_Y.get();
             if (player.getY() < (double) minY) {
@@ -139,8 +190,7 @@ public class WaystoneMapTpMod implements ModInitializer {
             }
         }
 
-        // Level cost requirement
-        int cost = ModConfigs.LEVEL_COST.get();
+        int cost = getFastTravelLevelCost(player, targetLevel);
         if (cost > 0 && player.experienceLevel < cost) {
             player.sendSystemMessage(
                     Component.literal("Fast travel requires " + cost + " " + (cost == 1 ? "level" : "levels") + ".").withStyle(ChatFormatting.RED)
@@ -148,6 +198,34 @@ public class WaystoneMapTpMod implements ModInitializer {
             return false;
         }
 
+        return true;
+    }
+
+    private boolean isCrossDimensionalFastTravel(ServerPlayer player, ServerLevel targetLevel) {
+        return targetLevel != null && !player.serverLevel().dimension().equals(targetLevel.dimension());
+    }
+
+    private int getFastTravelLevelCost(ServerPlayer player, ServerLevel targetLevel) {
+        int cost = ModConfigs.LEVEL_COST.get();
+        if (isCrossDimensionalFastTravel(player, targetLevel)) {
+            cost += ModConfigs.ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL.get();
+        }
+        return Math.max(0, cost);
+    }
+
+    private boolean consumeFastTravelLevelCost(ServerPlayer player, int cost) {
+        if (cost <= 0) return true;
+        if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR) return true;
+
+        if (player.experienceLevel < cost) {
+            player.displayClientMessage(
+                    Component.literal("Fast travel requires " + cost + " " + (cost == 1 ? "level" : "levels") + ".").withStyle(ChatFormatting.RED),
+                    true
+            );
+            return false;
+        }
+
+        player.giveExperienceLevels(-cost);
         return true;
     }
 
@@ -226,7 +304,30 @@ public class WaystoneMapTpMod implements ModInitializer {
         return false;
     }
 
-private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targetPos, Vec3 exactPos, String waypointName) {
+    private int handleTeleportInDimension(ServerPlayer player, String dimension, Vec3 vec, String waypointName) {
+        ResourceLocation dimId = ResourceLocation.tryParse(dimension);
+        if (dimId == null) {
+            player.displayClientMessage(Component.literal("Fast travel failed: invalid destination dimension: " + dimension)
+                    .withStyle(ChatFormatting.RED), true);
+            return 0;
+        }
+
+        MinecraftServer server = player.getServer();
+        if (server == null) return 0;
+
+        ResourceKey<Level> dimKey = ResourceKey.create(Registries.DIMENSION, dimId);
+        ServerLevel targetLevel = server.getLevel(dimKey);
+        if (targetLevel == null) {
+            player.displayClientMessage(Component.literal("Fast travel failed: destination dimension is not loaded: " + dimension)
+                    .withStyle(ChatFormatting.RED), true);
+            return 0;
+        }
+
+        BlockPos targetPos = BlockPos.containing(vec.x, vec.y, vec.z);
+        return handleTeleport(player, targetLevel, targetPos, vec, waypointName);
+    }
+
+    private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targetPos, Vec3 exactPos, String waypointName) {
         Optional<BlockPos> waystoneBottom = findWaystoneBottom(level, targetPos);
 
         // If it's a waystone waypoint, ALWAYS use safe-teleport (even for OPs).
@@ -269,6 +370,25 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
                 .withStyle(net.minecraft.ChatFormatting.RED), true);
     }
 
+    private boolean shouldSkipCountdown(ServerPlayer player) {
+        if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR) {
+            return true;
+        }
+
+        int radius = ModConfigs.NEARBY_WAYSTONE_USE_RADIUS.get();
+        boolean nearWaystone = isPlayerNearAnyWaystone(player.serverLevel(), player.blockPosition(), radius);
+        if (nearWaystone) {
+            return ModConfigs.DISABLE_COUNTDOWN_WHEN_NEAR_A_WAYSTONE.get();
+        }
+        return ModConfigs.DISABLE_COUNTDOWN_FOR_TELEPORTING_FROM_ANYWHERE.get();
+    }
+
+    private void completeTeleportWithFx(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact, int levelCost) {
+        if (!consumeFastTravelLevelCost(player, levelCost)) return;
+        safeTeleportToWaystoneNow(player, level, waystoneBottom, fallbackExact);
+        POST_FX.put(player.getUUID(), new PostTeleportFx(4));
+    }
+
     private void startWaystoneTeleportCountdown(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact, String waypointName) {
         // If the required client-side mods are missing, don't start a countdown
         // (but still allow the server-side teleport logic to run, so the mod remains usable).
@@ -297,36 +417,16 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
         }
 
 
-        // Creative mode should skip the whole countdown: instant teleport.
-        if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE) {
-            // Small poof at the origin.
+        if (shouldSkipCountdown(player)) {
             ServerLevel pl = player.serverLevel();
             pl.sendParticles(ParticleTypes.POOF,
                     player.getX(), player.getY() + 0.2D, player.getZ(),
                     18, 0.35D, 0.2D, 0.35D, 0.01D);
-
-            // We already validated there is a safe spot; use it.
-            teleportPlayer(player, level, safeNow.get());
-            // After arriving, do portal particles + teleport sound a couple ticks later.
-            POST_FX.put(player.getUUID(), new PostTeleportFx(4));
+            completeTeleportWithFx(player, level, waystoneBottom, fallbackExact, getFastTravelLevelCost(player, level));
             return;
         }
 
-        boolean nearWaystone = isPlayerNearAnyWaystone(player.serverLevel(), player.blockPosition(), ModConfigs.NEARBY_WAYSTONE_USE_RADIUS.get());
-        boolean skipCountdown = (nearWaystone && ModConfigs.DISABLE_COUNTDOWN_WHEN_NEAR_A_WAYSTONE.get())
-                || (!nearWaystone && ModConfigs.DISABLE_COUNTDOWN_FOR_TELEPORTING_FROM_ANYWHERE.get());
-
-        if (skipCountdown) {
-            ServerLevel pl = player.serverLevel();
-            pl.sendParticles(ParticleTypes.POOF,
-                    player.getX(), player.getY() + 0.2D, player.getZ(),
-                    18, 0.35D, 0.2D, 0.35D, 0.01D);
-            teleportPlayer(player, level, safeNow.get());
-            POST_FX.put(player.getUUID(), new PostTeleportFx(4));
-            return;
-        }
-
-        PendingTeleport pending = new PendingTeleport(level.dimension().location().toString(), waystoneBottom, fallbackExact, displayName);
+        PendingTeleport pending = new PendingTeleport(level.dimension().location().toString(), waystoneBottom, fallbackExact, displayName, getFastTravelLevelCost(player, level));
         PENDING.put(player.getUUID(), pending);
 
         // Immediate first title/sound (3s)
@@ -378,20 +478,17 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
             if (p.ticksRemaining <= 0) {
                 PENDING.remove(id);
 
-                ServerLevel level = server.getLevel(player.level().dimension());
-                if (level == null) level = player.serverLevel();
+                ServerLevel level = getPendingTargetLevel(server, p);
+                if (level == null) {
+                    player.displayClientMessage(
+                            Component.literal("Fast travel failed: destination dimension is not loaded: " + p.dim).withStyle(ChatFormatting.RED),
+                            true
+                    );
+                    continue;
+                }
 
-                // Consume XP levels right before teleport (if configured).
-                int cost = ModConfigs.LEVEL_COST.get();
-                if (cost > 0 && player.gameMode.getGameModeForPlayer() != GameType.CREATIVE) {
-                    if (player.experienceLevel < cost) {
-                        player.displayClientMessage(
-                                Component.literal("Fast travel requires " + cost + " " + (cost == 1 ? "level" : "levels") + ".").withStyle(ChatFormatting.RED),
-                                true
-                        );
-                        continue;
-                    }
-                    player.giveExperienceLevels(-cost);
+                if (!consumeFastTravelLevelCost(player, p.levelCost)) {
+                    continue;
                 }
 
                 safeTeleportToWaystoneNow(player, level, p.waystoneBottom, p.fallbackExact);
@@ -425,6 +522,13 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
                         24, 0.55D, 0.8D, 0.55D, 0.05D);
             }
         }
+    }
+
+    private ServerLevel getPendingTargetLevel(MinecraftServer server, PendingTeleport pending) {
+        ResourceLocation dimId = ResourceLocation.tryParse(pending.dim);
+        if (dimId == null) return null;
+        ResourceKey<Level> dimKey = ResourceKey.create(Registries.DIMENSION, dimId);
+        return server.getLevel(dimKey);
     }
 
     private void sendCountdownTitle(ServerPlayer player, String waystoneName, int seconds) {
@@ -555,13 +659,15 @@ private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targ
         final BlockPos waystoneBottom;
         final Vec3 fallbackExact;
         final String waystoneName;
+        final int levelCost;
         int ticksRemaining;
 
-        PendingTeleport(String dim, BlockPos waystoneBottom, Vec3 fallbackExact, String waystoneName) {
+        PendingTeleport(String dim, BlockPos waystoneBottom, Vec3 fallbackExact, String waystoneName, int levelCost) {
             this.dim = dim;
             this.waystoneBottom = waystoneBottom;
             this.fallbackExact = fallbackExact;
             this.waystoneName = waystoneName;
+            this.levelCost = levelCost;
             this.ticksRemaining = COUNTDOWN_SECONDS * TICKS_PER_SECOND;
         }
     }
