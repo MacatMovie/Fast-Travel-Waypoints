@@ -1,0 +1,14 @@
+{
+  "required": false,
+  "package": "com.macat.waystonemap.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "minVersion": "0.8",
+  "client": [
+    "XaeroWaypointTeleportCommandMixin",
+    "XaeroMapTeleporterCommandMixin",
+    "XaeroPlayerTeleporterCommandMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}
