@@ -14,6 +14,8 @@ public final class ModConfigs {
 
     public static final ForgeConfigSpec.IntValue CONFIG_VERSION;
     public static final ForgeConfigSpec.IntValue LEVEL_COST;
+    public static final ForgeConfigSpec.BooleanValue ENABLE_CROSS_DIMENSIONAL_TRAVEL;
+    public static final ForgeConfigSpec.IntValue ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL;
     public static final ForgeConfigSpec.BooleanValue REQUIRE_OPEN_SKY_PLAYER;
     public static final ForgeConfigSpec.BooleanValue REQUIRE_OPEN_SKY_DESTINATION;
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> OPEN_SKY_DIMENSION_WHITELIST;
@@ -30,12 +32,20 @@ public final class ModConfigs {
         b.push("fast_travel");
 
         CONFIG_VERSION = b
-                .comment("Internal config version used by the mod for future migrations. Current version: 2")
-                .defineInRange("config_version", 2, 1, Integer.MAX_VALUE);
+                .comment("Internal config version used by the mod for future migrations. Current version: 3")
+                .defineInRange("config_version", 3, 1, Integer.MAX_VALUE);
 
         LEVEL_COST = b
                 .comment("How many XP levels are consumed when a player fast-travels to a waystone waypoint. 0 = free.")
                 .defineInRange("level_cost", 0, 0, 1000);
+
+        ENABLE_CROSS_DIMENSIONAL_TRAVEL = b
+                .comment("If true, players can fast-travel to waystone waypoints in other dimensions using Xaero World Map's dimension toggle. If false, only same-dimension fast travel is allowed.")
+                .define("enable_cross_dimensional_travel", true);
+
+        ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL = b
+                .comment("Additional XP levels consumed only when fast-traveling between dimensions. This is added on top of level_cost. 0 = no extra cross-dimensional cost.")
+                .defineInRange("additional_level_cost_dimensional_travel", 0, 0, 1000);
 
         REQUIRE_NEARBY_WAYSTONE_FOR_USE = b
                 .comment("If true, players must be near any Waystone before they can start fast travel from the world map.")
