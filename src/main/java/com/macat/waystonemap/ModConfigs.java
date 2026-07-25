@@ -15,8 +15,8 @@ public final class ModConfigs {
 
     private ModConfigs() {}
 
-    public static final IntValue CONFIG_VERSION = new IntValue(3);
     public static final IntValue LEVEL_COST = new IntValue(0);
+    public static final BooleanValue USE_WAYSTONES_XP_COST_SCALING = new BooleanValue(false);
     public static final BooleanValue ENABLE_CROSS_DIMENSIONAL_TRAVEL = new BooleanValue(true);
     public static final IntValue ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL = new IntValue(0);
     public static final BooleanValue REQUIRE_OPEN_SKY_PLAYER = new BooleanValue(false);
@@ -54,8 +54,8 @@ public final class ModConfigs {
                 if (eq < 0) continue;
                 values.put(trimmed.substring(0, eq).trim(), trimmed.substring(eq + 1).trim());
             }
-            CONFIG_VERSION.set(parseInt(values.get("config_version"), CONFIG_VERSION.get(), 1, 9999));
             LEVEL_COST.set(parseInt(values.get("level_cost"), LEVEL_COST.get(), 0, 1000));
+            USE_WAYSTONES_XP_COST_SCALING.set(parseBool(values.get("use_waystones_xp_cost_scaling"), USE_WAYSTONES_XP_COST_SCALING.get()));
             ENABLE_CROSS_DIMENSIONAL_TRAVEL.set(parseBool(values.get("enable_cross_dimensional_travel"), ENABLE_CROSS_DIMENSIONAL_TRAVEL.get()));
             ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL.set(parseInt(values.get("additional_level_cost_dimensional_travel"), ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL.get(), 0, 1000));
             REQUIRE_NEARBY_WAYSTONE_FOR_USE.set(parseBool(values.get("require_nearby_waystone_for_use"), REQUIRE_NEARBY_WAYSTONE_FOR_USE.get()));
@@ -74,15 +74,16 @@ public final class ModConfigs {
     private static void save() {
         List<String> out = new ArrayList<>();
         out.add("# Fast Travel Waypoints common config");
-        out.add("config_version = " + CONFIG_VERSION.get());
-        out.add("");
-        out.add("# How many XP levels are consumed when a player fast-travels to a waystone waypoint. 0 = free.");
+        out.add("# How many XP levels are consumed when a player fast-travels to a waystone waypoint. 0 = free. Ignored when use_waystones_xp_cost_scaling=true.");
         out.add("level_cost = " + LEVEL_COST.get());
+        out.add("");
+        out.add("# If true, map-based fast travel uses Waystones' configured XP cost calculation, including distance scaling and dimensional costs, instead of level_cost and additional_level_cost_dimensional_travel. Default: false");
+        out.add("use_waystones_xp_cost_scaling = " + USE_WAYSTONES_XP_COST_SCALING.get());
         out.add("");
         out.add("# If false, same-dimension fast travel still works, but travel between dimensions is blocked.");
         out.add("enable_cross_dimensional_travel = " + ENABLE_CROSS_DIMENSIONAL_TRAVEL.get());
         out.add("");
-        out.add("# Extra XP levels added on top of level_cost only when fast-traveling between dimensions. 0 = no extra cost.");
+        out.add("# Extra XP levels added on top of level_cost only when fast-traveling between dimensions. 0 = no extra cost. Ignored when use_waystones_xp_cost_scaling=true.");
         out.add("additional_level_cost_dimensional_travel = " + ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL.get());
         out.add("");
         out.add("# If true, players must be near any Waystone before they can start fast travel from the world map.");

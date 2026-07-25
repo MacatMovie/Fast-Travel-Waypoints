@@ -4,6 +4,9 @@
   "package": "com.macat.waystonemap.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "AbstractContainerScreenAccessor",
+    "ScreenInitMixin",
+    "XaeroTeleportSafetyMixin",
     "XaeroWaypointTeleportCommandMixin",
     "XaeroMapTeleporterCommandMixin",
     "XaeroPlayerTeleporterCommandMixin",

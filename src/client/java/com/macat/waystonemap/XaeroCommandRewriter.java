@@ -29,7 +29,7 @@ public final class XaeroCommandRewriter {
     private static String rewriteNoSlash(String command) {
         String lower = command.toLowerCase(Locale.ROOT);
 
-        // XaerosMaps-x-Waystones can prefix the minimap waypoint command like:
+        // Waystones' built-in Xaero integration can prefix a waypoint command like:
         // execute in minecraft:the_nether run tp @s x y z
         if (lower.startsWith("execute in ")) {
             ExecuteParts parts = parseExecuteIn(command, "execute in ");

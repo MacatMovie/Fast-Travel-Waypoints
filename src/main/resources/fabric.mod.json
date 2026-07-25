@@ -23,9 +23,10 @@
     "fabric-api": "*",
     "minecraft": "1.21.1",
     "java": ">=21",
-    "waystones": ">=21.1.29",
-    "xaeroworldmap": ">=1.40.11",
-    "xmxw": ">=2.7.4"
+    "waystones": ">=21.1.37",
+    "xaeroworldmap": ">=1.44.2",
+    "xaerominimap": ">=26.4.2",
+    "xaerolib": ">=1.7.1"
   },
   "mixins": [
     {
