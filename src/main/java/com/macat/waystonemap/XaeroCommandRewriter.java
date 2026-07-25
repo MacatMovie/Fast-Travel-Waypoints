@@ -3,11 +3,11 @@ package com.macat.waystonemap;
 import java.util.Locale;
 
 /**
- * Last-resort client-side safety net for Xaero/XMXW teleport commands.
+ * Client-side normalizer for Xaero/XMXW teleport commands.
  *
- * Xaero can cache its teleport command formats before our config patcher edits the files,
- * especially on the first use of a dimension/world. Instead of trying to win that timing
- * race, targeted mixins call this right before Xaero sends the actual command packet.
+ * Xaero can send teleport requests through several code paths and command formats,
+ * including dimension-aware execute commands. Targeted mixins call this immediately
+ * before the command is sent so supported formats are routed through FTW consistently.
  */
 public final class XaeroCommandRewriter {
     private XaeroCommandRewriter() {}
@@ -29,7 +29,7 @@ public final class XaeroCommandRewriter {
     private static String rewriteNoSlash(String command) {
         String lower = command.toLowerCase(Locale.ROOT);
 
-        // XaerosMaps-x-Waystones can prefix the minimap waypoint command like:
+        // Waystones' built-in Xaero integration can prefix a waypoint command like:
         // execute in minecraft:the_nether run tp @s x y z
         if (lower.startsWith("execute in ")) {
             ExecuteParts parts = parseExecuteIn(command, "execute in ");

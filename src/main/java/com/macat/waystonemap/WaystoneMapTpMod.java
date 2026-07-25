@@ -20,11 +20,11 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.sounds.SoundSource;
@@ -44,8 +44,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 import java.lang.reflect.Method;
-import java.lang.reflect.Field;
 
 @Mod("fast_travel_waypoints")
 public class WaystoneMapTpMod {
@@ -54,6 +54,7 @@ public class WaystoneMapTpMod {
     private static final int TICKS_PER_SECOND = 20;
     private static final Map<UUID, PendingTeleport> PENDING = new ConcurrentHashMap<>();
     private static final Map<UUID, PostTeleportFx> POST_FX = new ConcurrentHashMap<>();
+    private static final Map<Block, Boolean> WAYSTONE_BLOCK_CACHE = new ConcurrentHashMap<>();
 
     public WaystoneMapTpMod() {
         ModConfigs.register();
@@ -62,6 +63,7 @@ public class WaystoneMapTpMod {
 
     @SubscribeEvent
     public void onClientTick(ClientTickEvent.Post event) {
+        invokeClientHook("applyXaeroWaypointDisplayDefault");
         invokeClientHook("releasePendingWorldMapKey");
     }
 
@@ -152,7 +154,7 @@ public class WaystoneMapTpMod {
         ServerLevel level = source.getLevel();
 
         // Grab raw command text (without leading slash in many cases).
-        // XaerosMaps-x-Waystones wraps cross-dimensional waypoint teleports as:
+        // Xaero waypoint integrations can wrap cross-dimensional waypoint teleports as:
         //   execute in <dimension> run wstp <x> <y> <z> <name>
         // Non-OP players normally cannot run /execute, so unwrap it here before vanilla rejects it.
         String raw = event.getParseResults().getReader().getString();
@@ -192,19 +194,24 @@ public class WaystoneMapTpMod {
 
         BlockPos targetPos = BlockPos.containing(x, y, z);
 
-        Optional<BlockPos> waystoneBottom = findWaystoneBottom(level, targetPos);
+        // This is only a vanilla /tp safety hook. Do not synchronously load/wait for
+        // destination chunks just to decide whether to hijack the command; that shows up
+        // as ServerChunkCache.waitForTasks() in Spark when teleporting to unloaded areas.
+        Optional<BlockPos> waystoneBottom = findWaystoneBottom(level, targetPos, false);
         if (waystoneBottom.isEmpty()) return;
 
         // Redirect vanilla /tp -> safe teleport to that waystone.
         event.setCanceled(true);
         if (!canStartFastTravel(player, level)) return;
-        startWaystoneTeleportCountdown(player, level, waystoneBottom.get(), new Vec3(x, y, z), null);
+        FastTravelCost travelCost = resolveFastTravelCost(player, level, waystoneBottom.get());
+        if (!canAffordFastTravelCost(player, travelCost, true)) return;
+        startWaystoneTeleportCountdown(player, level, waystoneBottom.get(), new Vec3(x, y, z), null, travelCost);
     }
 
 
     /**
-     * Handles cross-dimensional commands produced by XaerosMaps-x-Waystones after
-     * the World Map dimension toggle is used. The addon prepends vanilla /execute
+     * Handles cross-dimensional commands produced by Xaero waypoint integrations after
+     * the World Map dimension toggle is used. The integration prepends vanilla /execute
      * to our configured /wstp command, but normal players are not allowed to run
      * /execute. Intercepting it here lets FTW keep the destination dimension while
      * still applying all normal waystone safety/cost/countdown checks.
@@ -358,15 +365,6 @@ public class WaystoneMapTpMod {
             }
         }
 
-        // Level cost requirement
-        int cost = getFastTravelLevelCost(player, targetLevel);
-        if (cost > 0 && player.experienceLevel < cost) {
-            player.sendSystemMessage(
-                    Component.literal("Fast travel requires " + cost + " " + (cost == 1 ? "level" : "levels") + ".").withStyle(ChatFormatting.RED)
-            );
-            return false;
-        }
-
         return true;
     }
 
@@ -374,7 +372,12 @@ public class WaystoneMapTpMod {
         return targetLevel != null && !player.serverLevel().dimension().equals(targetLevel.dimension());
     }
 
-    private int getFastTravelLevelCost(ServerPlayer player, ServerLevel targetLevel) {
+    private boolean canBypassWaystoneVerification(ServerPlayer player) {
+        GameType gameMode = player.gameMode.getGameModeForPlayer();
+        return player.hasPermissions(2) && (gameMode == GameType.CREATIVE || gameMode == GameType.SPECTATOR);
+    }
+
+    private int getConfiguredFastTravelLevelCost(ServerPlayer player, ServerLevel targetLevel) {
         int cost = ModConfigs.LEVEL_COST.get();
         if (isCrossDimensionalFastTravel(player, targetLevel)) {
             cost += ModConfigs.ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL.get();
@@ -382,20 +385,186 @@ public class WaystoneMapTpMod {
         return Math.max(0, cost);
     }
 
-    private boolean consumeFastTravelLevelCost(ServerPlayer player, int cost) {
-        if (cost <= 0) return true;
-        if (player.gameMode.getGameModeForPlayer() == GameType.CREATIVE || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR) return true;
+    private FastTravelCost resolveFastTravelCost(ServerPlayer player, ServerLevel targetLevel, BlockPos waystoneBottom) {
+        GameType gameMode = player.gameMode.getGameModeForPlayer();
+        if (gameMode == GameType.CREATIVE || gameMode == GameType.SPECTATOR) {
+            return FastTravelCost.free();
+        }
 
-        if (player.experienceLevel < cost) {
-            player.displayClientMessage(
-                    Component.literal("Fast travel requires " + cost + " " + (cost == 1 ? "level" : "levels") + ".").withStyle(ChatFormatting.RED),
-                    true
-            );
+        if (!ModConfigs.USE_WAYSTONES_XP_COST_SCALING.get()) {
+            return FastTravelCost.configuredLevels(getConfiguredFastTravelLevelCost(player, targetLevel));
+        }
+
+        return resolveWaystonesXpCost(player, targetLevel, waystoneBottom);
+    }
+
+    /**
+     * Resolves only Waystones' XP point / XP level requirements. Other Waystones
+     * requirements (items, cooldowns, etc.) remain owned by Waystones and are not
+     * applied to Fast Travel Waypoints' separate map-travel flow.
+     *
+     * Reflection keeps the source project buildable without adding a hard compile-time
+     * Waystones API dependency; Waystones is still a required runtime dependency.
+     */
+    private FastTravelCost resolveWaystonesXpCost(ServerPlayer player, ServerLevel targetLevel, BlockPos waystoneBottom) {
+        try {
+            Object targetWaystone = getWaystoneObject(targetLevel, waystoneBottom);
+            if (targetWaystone == null) {
+                return FastTravelCost.failed();
+            }
+
+            Class<?> apiClass = Class.forName("net.blay09.mods.waystones.api.WaystonesAPI");
+            Object context = null;
+            for (Method method : apiClass.getMethods()) {
+                if (!method.getName().equals("createUnboundTeleportContext")) continue;
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length == 2 && params[0].isAssignableFrom(player.getClass()) && params[1].isInstance(targetWaystone)) {
+                    context = method.invoke(null, player, targetWaystone);
+                    break;
+                }
+            }
+            if (context == null) {
+                return FastTravelCost.failed();
+            }
+
+            // When map travel starts near a Waystone, expose that Waystone as the
+            // source so custom Waystones requirements such as source_is_waystone
+            // behave the same way they do in Waystones' own destination screen.
+            int sourceRadius = ModConfigs.NEARBY_WAYSTONE_USE_RADIUS.get();
+            Optional<BlockPos> sourceBottom = findNearbyWaystoneBottom(player.serverLevel(), player.blockPosition(), sourceRadius);
+            if (sourceBottom.isPresent()) {
+                Object sourceWaystone = getWaystoneObject(player.serverLevel(), sourceBottom.get());
+                if (sourceWaystone != null) {
+                    for (Method method : context.getClass().getMethods()) {
+                        if (!method.getName().equals("setFromWaystone")) continue;
+                        Class<?>[] params = method.getParameterTypes();
+                        if (params.length == 1 && params[0].isInstance(sourceWaystone)) {
+                            method.invoke(context, sourceWaystone);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            Object requirement = null;
+            for (Method method : apiClass.getMethods()) {
+                if (!method.getName().equals("resolveRequirements")) continue;
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length == 1 && params[0].isInstance(context)) {
+                    requirement = method.invoke(null, context);
+                    break;
+                }
+            }
+            if (requirement == null) {
+                return FastTravelCost.failed();
+            }
+
+            WaystonesXpAccumulator accumulator = new WaystonesXpAccumulator();
+            collectWaystonesXpRequirements(requirement, accumulator);
+            return FastTravelCost.waystones(accumulator.points, accumulator.levels);
+        } catch (Throwable ignored) {
+            return FastTravelCost.failed();
+        }
+    }
+
+    private void collectWaystonesXpRequirements(Object requirement, WaystonesXpAccumulator accumulator) throws Exception {
+        if (requirement == null) return;
+
+        String className = requirement.getClass().getSimpleName();
+        if ("ExperiencePointsRequirement".equals(className)) {
+            Object value = requirement.getClass().getMethod("getPoints").invoke(requirement);
+            if (value instanceof Number number) {
+                accumulator.points += Math.max(0, number.intValue());
+            }
+            return;
+        }
+
+        if ("ExperienceLevelRequirement".equals(className)) {
+            Object value = requirement.getClass().getMethod("getLevels").invoke(requirement);
+            if (value instanceof Number number) {
+                accumulator.levels += Math.max(0, number.intValue());
+            }
+            return;
+        }
+
+        if ("CombinedRequirement".equals(className)) {
+            Object children = requirement.getClass().getMethod("getRequirements").invoke(requirement);
+            if (children instanceof Iterable<?> iterable) {
+                for (Object child : iterable) {
+                    collectWaystonesXpRequirements(child, accumulator);
+                }
+            }
+        }
+    }
+
+    private boolean canAffordFastTravelCost(ServerPlayer player, FastTravelCost cost, boolean showMessage) {
+        GameType gameMode = player.gameMode.getGameModeForPlayer();
+        if (gameMode == GameType.CREATIVE || gameMode == GameType.SPECTATOR) return true;
+
+        if (!cost.resolved) {
+            if (showMessage) {
+                player.displayClientMessage(
+                        Component.literal("Fast travel could not calculate the Waystones XP cost.").withStyle(ChatFormatting.RED),
+                        true
+                );
+            }
             return false;
         }
 
-        player.giveExperienceLevels(-cost);
+        boolean enoughLevels = player.experienceLevel >= cost.levels;
+        boolean enoughPoints = getTotalExperiencePoints(player) >= cost.xpPoints;
+        if (enoughLevels && enoughPoints) return true;
+
+        if (showMessage) {
+            player.displayClientMessage(buildFastTravelCostMessage(cost).withStyle(ChatFormatting.RED), true);
+        }
+        return false;
+    }
+
+    private MutableComponent buildFastTravelCostMessage(FastTravelCost cost) {
+        if (cost.xpPoints > 0 && cost.levels > 0) {
+            return Component.literal("Fast travel requires " + cost.levels + " "
+                    + (cost.levels == 1 ? "level" : "levels") + " and " + cost.xpPoints + " XP.");
+        }
+        if (cost.xpPoints > 0) {
+            return Component.literal("Fast travel requires " + cost.xpPoints + " XP.");
+        }
+        return Component.literal("Fast travel requires " + cost.levels + " "
+                + (cost.levels == 1 ? "level" : "levels") + ".");
+    }
+
+    private boolean consumeFastTravelCost(ServerPlayer player, FastTravelCost cost) {
+        if (cost.isFree()) return true;
+        if (!canAffordFastTravelCost(player, cost, true)) return false;
+
+        if (cost.levels > 0) {
+            player.giveExperienceLevels(-cost.levels);
+        }
+        if (cost.xpPoints > 0) {
+            player.giveExperiencePoints(-cost.xpPoints);
+        }
         return true;
+    }
+
+    private int getTotalExperiencePoints(ServerPlayer player) {
+        int xpForLevel = getCumulativeXpNeededForLevel(player.experienceLevel);
+        int xpForProgress = (int) Math.floor(player.experienceProgress * getXpNeededForNextLevel(player.experienceLevel));
+        return xpForLevel + xpForProgress;
+    }
+
+    private int getXpNeededForNextLevel(int level) {
+        if (level >= 30) {
+            return 112 + (level - 30) * 9;
+        }
+        return level >= 15 ? 37 + (level - 15) * 5 : 7 + level * 2;
+    }
+
+    private int getCumulativeXpNeededForLevel(int targetLevel) {
+        int total = 0;
+        for (int level = 0; level < targetLevel; level++) {
+            total += getXpNeededForNextLevel(level);
+        }
+        return total;
     }
 
     private boolean canSeeSkyIgnoringLeaves(ServerLevel level, BlockPos pos) {
@@ -429,9 +598,14 @@ public class WaystoneMapTpMod {
     }
 
     private boolean isPlayerNearAnyWaystone(ServerLevel level, BlockPos playerPos, int radius) {
+        return findNearbyWaystoneBottom(level, playerPos, radius).isPresent();
+    }
+
+    private Optional<BlockPos> findNearbyWaystoneBottom(ServerLevel level, BlockPos playerPos, int radius) {
         int minY = Math.max(level.getMinBuildHeight(), playerPos.getY() - Math.min(radius, 4));
         int maxY = Math.min(level.getMaxBuildHeight() - 1, playerPos.getY() + Math.min(radius, 4));
         int radiusSq = radius * radius;
+        Vec3 playerCenter = new Vec3(playerPos.getX() + 0.5D, playerPos.getY() + 0.5D, playerPos.getZ() + 0.5D);
 
         for (int y = minY; y <= maxY; y++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -439,23 +613,22 @@ public class WaystoneMapTpMod {
                     if ((dx * dx) + (dz * dz) > radiusSq) continue;
 
                     BlockPos checkPos = new BlockPos(playerPos.getX() + dx, y, playerPos.getZ() + dz);
-                    if (!isWaystoneBlock(level, checkPos)) continue;
+                    if (!isWaystoneBlock(level, checkPos, false)) continue;
 
                     BlockPos bottom = checkPos;
-                    while (isWaystoneBlock(level, bottom.below())) {
+                    while (isWaystoneBlock(level, bottom.below(), false)) {
                         bottom = bottom.below();
                     }
 
-                    Vec3 playerCenter = new Vec3(playerPos.getX() + 0.5D, playerPos.getY() + 0.5D, playerPos.getZ() + 0.5D);
                     Vec3 waystoneCenter = new Vec3(bottom.getX() + 0.5D, bottom.getY() + 0.5D, bottom.getZ() + 0.5D);
                     if (playerCenter.distanceToSqr(waystoneCenter) <= radiusSq) {
-                        return true;
+                        return Optional.of(bottom);
                     }
                 }
             }
         }
 
-        return false;
+        return Optional.empty();
     }
 
     private boolean isOpenSkyCheckEnabledInThisDimension(ServerLevel level) {
@@ -498,25 +671,54 @@ public class WaystoneMapTpMod {
     }
 
     private int handleTeleport(ServerPlayer player, ServerLevel level, BlockPos targetPos, Vec3 exactPos, String waypointName) {
-        Optional<BlockPos> waystoneBottom = findWaystoneBottom(level, targetPos);
+        // First do a loaded-chunk-only check. This keeps OP/free teleports from
+        // synchronously loading remote chunks just to decide whether the clicked
+        // position is a Waystone. That chunk wait is what shows up in Spark as
+        // ServerChunkCache.waitForTasks() under this mod.
+        Optional<BlockPos> waystoneBottom = findWaystoneBottom(level, targetPos, false);
 
-        // If it's a waystone waypoint, ALWAYS use safe-teleport (even for OPs).
+        // If the target area is already loaded and it is a waystone waypoint, use
+        // safe-teleport even for OPs.
         if (waystoneBottom.isPresent()) {
             if (!canStartFastTravel(player, level)) {
                 return 0;
             }
-            startWaystoneTeleportCountdown(player, level, waystoneBottom.get(), exactPos, waypointName);
+            FastTravelCost travelCost = resolveFastTravelCost(player, level, waystoneBottom.get());
+            if (!canAffordFastTravelCost(player, travelCost, true)) {
+                return 0;
+            }
+            startWaystoneTeleportCountdown(player, level, waystoneBottom.get(), exactPos, waypointName, travelCost);
             return 1;
         }
 
-        // Not a waystone: non-OPs get denied, OPs can teleport anywhere.
-        if (!player.hasPermissions(2)) {
-            player.displayClientMessage(Component.literal("No Waystone at the selected waypoint."), true);
-            return 0;
+        // Only OPs in Creative/Spectator keep the "teleport anywhere" behavior.
+        // Do this before any chunk-loading Waystone verification so admin map
+        // teleports do not hitch the server thread. OPs in Survival/Adventure
+        // still fall through to the normal Waystone validation below.
+        if (canBypassWaystoneVerification(player)) {
+            teleportPlayer(player, level, exactPos);
+            return 1;
         }
 
-        teleportPlayer(player, level, exactPos);
-        return 1;
+        // Survival/Adventure OPs and all non-OP players still need a real Waystone
+        // verification. If the destination chunk is unloaded, this may load/wait
+        // for it, but that is intentional: the mod has to confirm the waypoint is
+        // actually a Waystone before it allows restricted fast travel.
+        waystoneBottom = findWaystoneBottom(level, targetPos, true);
+        if (waystoneBottom.isPresent()) {
+            if (!canStartFastTravel(player, level)) {
+                return 0;
+            }
+            FastTravelCost travelCost = resolveFastTravelCost(player, level, waystoneBottom.get());
+            if (!canAffordFastTravelCost(player, travelCost, true)) {
+                return 0;
+            }
+            startWaystoneTeleportCountdown(player, level, waystoneBottom.get(), exactPos, waypointName, travelCost);
+            return 1;
+        }
+
+        player.displayClientMessage(Component.literal("No Waystone at the selected waypoint."), true);
+        return 0;
     }
 
     private void teleportPlayer(ServerPlayer player, ServerLevel level, Vec3 exactPos) {
@@ -553,13 +755,13 @@ public class WaystoneMapTpMod {
         return ModConfigs.DISABLE_COUNTDOWN_FOR_TELEPORTING_FROM_ANYWHERE.get();
     }
 
-    private void completeTeleportWithFx(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact, int levelCost) {
-        if (!consumeFastTravelLevelCost(player, levelCost)) return;
+    private void completeTeleportWithFx(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact, FastTravelCost travelCost) {
+        if (!consumeFastTravelCost(player, travelCost)) return;
         safeTeleportToWaystoneNow(player, level, waystoneBottom, fallbackExact);
         POST_FX.put(player.getUUID(), new PostTeleportFx(4));
     }
 
-    private void startWaystoneTeleportCountdown(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact, String waypointName) {
+    private void startWaystoneTeleportCountdown(ServerPlayer player, ServerLevel level, BlockPos waystoneBottom, Vec3 fallbackExact, String waypointName, FastTravelCost travelCost) {
         // If the required client-side mods are missing, don't start a countdown
         // (but still allow the server-side teleport logic to run, so the mod remains usable).
         // The hard dependency is enforced via mods.toml on the client.
@@ -592,11 +794,11 @@ public class WaystoneMapTpMod {
             pl.sendParticles(ParticleTypes.POOF,
                     player.getX(), player.getY() + 0.2D, player.getZ(),
                     18, 0.35D, 0.2D, 0.35D, 0.01D);
-            completeTeleportWithFx(player, level, waystoneBottom, fallbackExact, getFastTravelLevelCost(player, level));
+            completeTeleportWithFx(player, level, waystoneBottom, fallbackExact, travelCost);
             return;
         }
 
-        PendingTeleport pending = new PendingTeleport(level.dimension().location().toString(), waystoneBottom, fallbackExact, displayName, getFastTravelLevelCost(player, level));
+        PendingTeleport pending = new PendingTeleport(level.dimension().location().toString(), waystoneBottom, fallbackExact, displayName, travelCost);
         PENDING.put(player.getUUID(), pending);
 
         // Immediate first title/sound (3s)
@@ -660,8 +862,8 @@ public class WaystoneMapTpMod {
                     continue;
                 }
 
-                // Consume XP levels right before teleport (if configured).
-                if (!consumeFastTravelLevelCost(player, p.levelCost)) {
+                // Consume the configured XP cost right before teleport.
+                if (!consumeFastTravelCost(player, p.travelCost)) {
                     continue;
                 }
 
@@ -773,6 +975,102 @@ public class WaystoneMapTpMod {
         return fallback;
     }
 
+    /**
+     * Resolves the Waystones database entry for a physical Waystone block.
+     *
+     * Destination chunks can be loaded just enough for the block and block entity to
+     * exist before Waystones has run its block-entity onLoad initialization. During
+     * that window, blockEntity.getWaystone() returns InvalidWaystone, whose random UUID
+     * and fallback Overworld dimension cannot be used for XP requirement calculation.
+     *
+     * A regular Waystone has block entities in both halves. Waystones may update the
+     * shared database object's stored position from either half as they load, so a valid
+     * Waystone can report either the lower or upper block position. A valid object read
+     * directly from the requested block entity is therefore trusted once its dimension
+     * matches. Database fallback matching accepts either half of the same structure.
+     */
+    private Object getWaystoneObject(ServerLevel level, BlockPos waystoneBottom) {
+        try {
+            BlockEntity blockEntity = level.getBlockEntity(waystoneBottom);
+            if (blockEntity == null) {
+                blockEntity = level.getBlockEntity(waystoneBottom.above());
+            }
+            if (blockEntity != null) {
+                Object localWaystone = blockEntity.getClass().getMethod("getWaystone").invoke(blockEntity);
+                if (isUsableLocalWaystone(localWaystone, level)) {
+                    return localWaystone;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return findRegisteredWaystone(level, waystoneBottom);
+    }
+
+    private Object findRegisteredWaystone(ServerLevel level, BlockPos waystoneBottom) {
+        MinecraftServer server = level.getServer();
+        if (server == null) {
+            return null;
+        }
+
+        try {
+            Class<?> apiClass = Class.forName("net.blay09.mods.waystones.api.WaystonesAPI");
+            for (Method method : apiClass.getMethods()) {
+                if (!method.getName().equals("getAllWaystones")) continue;
+
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length != 1 || !params[0].isInstance(server)) continue;
+
+                Object result = method.invoke(null, server);
+                if (!(result instanceof Stream<?> stream)) {
+                    continue;
+                }
+
+                try (stream) {
+                    return stream
+                            .filter(waystone -> isRegisteredWaystoneAt(waystone, level, waystoneBottom))
+                            .findFirst()
+                            .orElse(null);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return null;
+    }
+
+    private boolean isUsableLocalWaystone(Object waystone, ServerLevel level) {
+        if (waystone == null) {
+            return false;
+        }
+
+        try {
+            Method isValid = waystone.getClass().getMethod("isValid");
+            Object validResult = isValid.invoke(waystone);
+            if (!(validResult instanceof Boolean valid) || !valid) {
+                return false;
+            }
+
+            Object storedDimension = waystone.getClass().getMethod("getDimension").invoke(waystone);
+            return level.dimension().equals(storedDimension);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private boolean isRegisteredWaystoneAt(Object waystone, ServerLevel level, BlockPos waystoneBottom) {
+        if (!isUsableLocalWaystone(waystone, level)) {
+            return false;
+        }
+
+        try {
+            Object storedPos = waystone.getClass().getMethod("getPos").invoke(waystone);
+            return waystoneBottom.equals(storedPos) || waystoneBottom.above().equals(storedPos);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private void invokeClientHook(String methodName) {
         try {
             Class<?> clientHooksClass = Class.forName("com.macat.waystonemap.ClientHooks");
@@ -816,6 +1114,43 @@ public class WaystoneMapTpMod {
     }
 
 
+    private static class WaystonesXpAccumulator {
+        int points;
+        int levels;
+    }
+
+    private static class FastTravelCost {
+        final int xpPoints;
+        final int levels;
+        final boolean resolved;
+
+        private FastTravelCost(int xpPoints, int levels, boolean resolved) {
+            this.xpPoints = Math.max(0, xpPoints);
+            this.levels = Math.max(0, levels);
+            this.resolved = resolved;
+        }
+
+        static FastTravelCost free() {
+            return new FastTravelCost(0, 0, true);
+        }
+
+        static FastTravelCost configuredLevels(int levels) {
+            return new FastTravelCost(0, levels, true);
+        }
+
+        static FastTravelCost waystones(int xpPoints, int levels) {
+            return new FastTravelCost(xpPoints, levels, true);
+        }
+
+        static FastTravelCost failed() {
+            return new FastTravelCost(0, 0, false);
+        }
+
+        boolean isFree() {
+            return resolved && xpPoints <= 0 && levels <= 0;
+        }
+    }
+
     private static class ParsedTeleportCommand {
         final double x;
         final double y;
@@ -835,15 +1170,15 @@ public class WaystoneMapTpMod {
         final BlockPos waystoneBottom;
         final Vec3 fallbackExact;
         final String waystoneName;
-        final int levelCost;
+        final FastTravelCost travelCost;
         int ticksRemaining;
 
-        PendingTeleport(String dim, BlockPos waystoneBottom, Vec3 fallbackExact, String waystoneName, int levelCost) {
+        PendingTeleport(String dim, BlockPos waystoneBottom, Vec3 fallbackExact, String waystoneName, FastTravelCost travelCost) {
             this.dim = dim;
             this.waystoneBottom = waystoneBottom;
             this.fallbackExact = fallbackExact;
             this.waystoneName = waystoneName;
-            this.levelCost = levelCost;
+            this.travelCost = travelCost;
             this.ticksRemaining = COUNTDOWN_SECONDS * TICKS_PER_SECOND;
         }
     }
@@ -854,26 +1189,30 @@ public class WaystoneMapTpMod {
     }
 
     /**
-     * Checks around the target position for a Waystone block.
-     * We search a 3x3 area in X/Z (radius 1) and a small vertical range
-     * from Y-2 to Y+1 to account for player height and fractional coords.
-     */
-    /**
      * Finds a waystone block near the waypoint and returns the BOTTOM blockpos of the 2-block waystone.
+     *
+     * allowChunkLoad=true is used for intentional /wstp travel, where checking the destination is expected.
+     * allowChunkLoad=false is used only by the vanilla /tp interceptor so a normal /tp into an unloaded
+     * chunk does not block the server thread while this mod is merely deciding whether to intercept it.
      */
     private Optional<BlockPos> findWaystoneBottom(Level level, BlockPos targetPos) {
+        return findWaystoneBottom(level, targetPos, true);
+    }
+
+    private Optional<BlockPos> findWaystoneBottom(Level level, BlockPos targetPos, boolean allowChunkLoad) {
         int radiusXZ = 1;
         int baseY = targetPos.getY();
+        BlockPos.MutableBlockPos checkPos = new BlockPos.MutableBlockPos();
 
         for (int dy = -2; dy <= 2; dy++) {
             int y = baseY + dy;
             for (int dx = -radiusXZ; dx <= radiusXZ; dx++) {
                 for (int dz = -radiusXZ; dz <= radiusXZ; dz++) {
-                    BlockPos checkPos = new BlockPos(targetPos.getX() + dx, y, targetPos.getZ() + dz);
-                    if (isWaystoneBlock(level, checkPos)) {
-                        // Walk down to bottom of the 2-block waystone
-                        BlockPos bottom = checkPos;
-                        while (isWaystoneBlock(level, bottom.below())) {
+                    checkPos.set(targetPos.getX() + dx, y, targetPos.getZ() + dz);
+                    if (isWaystoneBlock(level, checkPos, allowChunkLoad)) {
+                        // Walk down to bottom of the 2-block waystone.
+                        BlockPos bottom = checkPos.immutable();
+                        while (isWaystoneBlock(level, bottom.below(), allowChunkLoad)) {
                             bottom = bottom.below();
                         }
                         return Optional.of(bottom);
@@ -883,9 +1222,10 @@ public class WaystoneMapTpMod {
         }
 
         // Also handle the common case where the waypoint is on the TOP block.
-        if (isWaystoneBlock(level, targetPos.below())) {
-            BlockPos bottom = targetPos.below();
-            while (isWaystoneBlock(level, bottom.below())) {
+        BlockPos belowTarget = targetPos.below();
+        if (isWaystoneBlock(level, belowTarget, allowChunkLoad)) {
+            BlockPos bottom = belowTarget;
+            while (isWaystoneBlock(level, bottom.below(), allowChunkLoad)) {
                 bottom = bottom.below();
             }
             return Optional.of(bottom);
@@ -895,11 +1235,24 @@ public class WaystoneMapTpMod {
     }
 
     private boolean isWaystoneBlock(Level level, BlockPos pos) {
+        return isWaystoneBlock(level, pos, true);
+    }
+
+    private boolean isWaystoneBlock(Level level, BlockPos pos, boolean allowChunkLoad) {
+        if (level.isOutsideBuildHeight(pos)) return false;
+
+        // Critical for the /tp command interceptor: getBlockState() on an unloaded server chunk can
+        // synchronously load/wait for that chunk. hasChunkAt() is a cheap loaded-chunk check.
+        if (!allowChunkLoad && !level.hasChunkAt(pos)) return false;
+
         BlockState state = level.getBlockState(pos);
         if (state.isAir()) return false;
-        ResourceLocation rl = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-        if (rl == null) return false;
-        return "waystones".equals(rl.getNamespace()) && rl.getPath().contains("waystone");
+
+        // Cache per Block instance so larger nearby-waystone scans do not repeatedly ask the registry.
+        return WAYSTONE_BLOCK_CACHE.computeIfAbsent(state.getBlock(), block -> {
+            ResourceLocation rl = BuiltInRegistries.BLOCK.getKey(block);
+            return rl != null && "waystones".equals(rl.getNamespace()) && rl.getPath().contains("waystone");
+        });
     }
 
     private static final Direction[] SIDE_ORDER = new Direction[]{

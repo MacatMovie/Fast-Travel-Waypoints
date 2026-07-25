@@ -49,6 +49,10 @@ public final class ClientHooks {
         }
     }
 
+    public static void applyXaeroWaypointDisplayDefault() {
+        XaeroWaypointDisplayDefault.tick();
+    }
+
     public static void releasePendingWorldMapKey() {
         if (!pendingRelease) return;
         pendingRelease = false;

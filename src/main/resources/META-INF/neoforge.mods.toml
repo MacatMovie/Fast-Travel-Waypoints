@@ -5,7 +5,7 @@ issueTrackerURL=""
 
 [[mods]]
   modId="fast_travel_waypoints"
-  version="1.3.0"
+  version="1.4.0"
   displayName="Fast Travel Waypoints"
   displayURL=""
   logoFile="logo.png"
@@ -31,31 +31,31 @@ issueTrackerURL=""
 
 # Client-side required dependencies (Xaero integration)
 [[dependencies.fast_travel_waypoints]]
+  modId="xaerominimap"
+  type="required"
+  versionRange="[26.4.2,)"
+  ordering="NONE"
+  side="CLIENT"
+
+[[dependencies.fast_travel_waypoints]]
   modId="xaeroworldmap"
   type="required"
-  versionRange="[0,)"
+  versionRange="[1.44.2,)"
   ordering="NONE"
   side="CLIENT"
 
 [[dependencies.fast_travel_waypoints]]
   modId="xaerolib"
   type="required"
-  versionRange="[0,)"
+  versionRange="[1.7.1,)"
   ordering="NONE"
   side="CLIENT"
 
-[[dependencies.fast_travel_waypoints]]
-  modId="xmxw"
-  type="required"
-  versionRange="[0,)"
-  ordering="NONE"
-  side="CLIENT"
-
-# Required: Waystones provides the actual blocks/teleport targets used by this mod.
+# Required: Waystones provides the blocks/teleport targets and built-in Xaero waypoint integration.
 [[dependencies.fast_travel_waypoints]]
   modId="waystones"
   type="required"
-  versionRange="[0,)"
+  versionRange="[21.1.37,)"
   ordering="NONE"
   side="BOTH"
 [[mixins]]

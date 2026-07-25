@@ -17,6 +17,17 @@ public class XaeroWaypointTeleportCommandMixin {
         return XaeroCommandRewriter.rewrite(command);
     }
 
+
+    @ModifyArg(
+            method = "teleportToWaypoint(Lxaero/common/minimap/waypoints/Waypoint;Lxaero/hud/minimap/world/MinimapWorld;Lnet/minecraft/client/gui/screens/Screen;Z)V",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/ClientPacketListener;sendCommand(Ljava/lang/String;)V", remap = true),
+            index = 0,
+            require = 0
+    )
+    private String fastTravelWaypoints$rewriteCommandFallback(String command) {
+        return XaeroCommandRewriter.rewrite(command);
+    }
+
     @ModifyArg(
             method = "teleportToWaypoint(Lxaero/common/minimap/waypoints/Waypoint;Lxaero/hud/minimap/world/MinimapWorld;Lnet/minecraft/client/gui/screens/Screen;Z)V",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/ClientPacketListener;sendChat(Ljava/lang/String;)V", remap = true),
