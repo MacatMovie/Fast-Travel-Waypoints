@@ -12,8 +12,8 @@ public final class ModConfigs {
 
     public static final ForgeConfigSpec SPEC;
 
-    public static final ForgeConfigSpec.IntValue CONFIG_VERSION;
     public static final ForgeConfigSpec.IntValue LEVEL_COST;
+    public static final ForgeConfigSpec.BooleanValue USE_WAYSTONES_XP_COST_SCALING;
     public static final ForgeConfigSpec.BooleanValue ENABLE_CROSS_DIMENSIONAL_TRAVEL;
     public static final ForgeConfigSpec.IntValue ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL;
     public static final ForgeConfigSpec.BooleanValue REQUIRE_OPEN_SKY_PLAYER;
@@ -31,20 +31,20 @@ public final class ModConfigs {
 
         b.push("fast_travel");
 
-        CONFIG_VERSION = b
-                .comment("Internal config version used by the mod for future migrations. Current version: 3")
-                .defineInRange("config_version", 3, 1, Integer.MAX_VALUE);
-
         LEVEL_COST = b
-                .comment("How many XP levels are consumed when a player fast-travels to a waystone waypoint. 0 = free.")
+                .comment("How many XP levels are consumed when a player fast-travels to a waystone waypoint. 0 = free. Ignored when use_waystones_xp_cost_scaling=true.")
                 .defineInRange("level_cost", 0, 0, 1000);
+
+        USE_WAYSTONES_XP_COST_SCALING = b
+                .comment("If true, map-based fast travel uses Waystones' configured waystone-to-waystone XP level calculation, including distance scaling and dimensional costs, instead of level_cost and additional_level_cost_dimensional_travel. Default: false")
+                .define("use_waystones_xp_cost_scaling", false);
 
         ENABLE_CROSS_DIMENSIONAL_TRAVEL = b
                 .comment("If true, players can fast-travel to waystone waypoints in other dimensions using Xaero World Map's dimension toggle. If false, only same-dimension fast travel is allowed.")
                 .define("enable_cross_dimensional_travel", true);
 
         ADDITIONAL_LEVEL_COST_DIMENSIONAL_TRAVEL = b
-                .comment("Additional XP levels consumed only when fast-traveling between dimensions. This is added on top of level_cost. 0 = no extra cross-dimensional cost.")
+                .comment("Additional XP levels consumed only when fast-traveling between dimensions. This is added on top of level_cost. 0 = no extra cross-dimensional cost. Ignored when use_waystones_xp_cost_scaling=true.")
                 .defineInRange("additional_level_cost_dimensional_travel", 0, 0, 1000);
 
         REQUIRE_NEARBY_WAYSTONE_FOR_USE = b

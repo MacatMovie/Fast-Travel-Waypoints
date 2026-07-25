@@ -3,7 +3,7 @@ package com.macat.waystonemap;
 import java.util.Locale;
 
 /**
- * Last-resort client-side safety net for Xaero/XMXW teleport commands.
+ * Last-resort client-side safety net for Xaero waypoint teleport commands.
  *
  * Xaero can cache its teleport command formats before our config patcher edits the files,
  * especially on the first use of a dimension/world. Instead of trying to win that timing
@@ -29,7 +29,7 @@ public final class XaeroCommandRewriter {
     private static String rewriteNoSlash(String command) {
         String lower = command.toLowerCase(Locale.ROOT);
 
-        // XaerosMaps-x-Waystones can prefix the minimap waypoint command like:
+        // Xaero waypoint integrations can prefix the minimap waypoint command like:
         // execute in minecraft:the_nether run tp @s x y z
         if (lower.startsWith("execute in ")) {
             ExecuteParts parts = parseExecuteIn(command, "execute in ");

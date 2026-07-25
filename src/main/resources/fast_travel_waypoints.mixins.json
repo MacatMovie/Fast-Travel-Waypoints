@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "package": "com.macat.waystonemap.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "fast_travel_waypoints.refmap.json",
+  "minVersion": "0.8",
+  "client": [
+    "XaeroTeleportSafetyMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

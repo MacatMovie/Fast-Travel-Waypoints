@@ -15,7 +15,7 @@ import java.lang.reflect.Field;
 public class WaystoneSelectionScreenHook {
 
     private static final String BASE_SCREEN_CLASS = "net.blay09.mods.waystones.client.gui.screen.WaystoneSelectionScreenBase";
-    private static final String CHOOSE_VIA_WORLD_MAP = "Choose via World Map";
+    private static final String SELECT_VIA_WORLD_MAP = "Select via World Map";
 
     @SubscribeEvent
     public static void onScreenInit(ScreenEvent.Init.Post event) {
@@ -35,7 +35,7 @@ public class WaystoneSelectionScreenHook {
             int y = Math.max(prev.getY(), next.getY()) + 26;
             int width = prev.getWidth() + next.getWidth() + 10;
 
-            Button openMapButton = Button.builder(Component.literal(CHOOSE_VIA_WORLD_MAP), button -> {
+            Button openMapButton = Button.builder(Component.literal(SELECT_VIA_WORLD_MAP), button -> {
                 Minecraft minecraft = Minecraft.getInstance();
                 if (minecraft != null) {
                     minecraft.setScreen(null);

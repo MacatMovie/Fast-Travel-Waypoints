@@ -26,6 +26,7 @@ public class XaeroConfigPatcher {
 
     public static void patchEarly() {
         patchAll();
+        XaeroWaypointDisplayDefault.tick();
         retryTicks = Math.max(retryTicks, 20 * 60);
     }
 
@@ -38,6 +39,7 @@ public class XaeroConfigPatcher {
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        XaeroWaypointDisplayDefault.tick();
         if (retryTicks-- > 0 && retryTicks % 20 == 0) {
             patchAll();
         }
