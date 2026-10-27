@@ -1,0 +1,62 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="MIT"
+issueTrackerURL=""
+
+[[mods]]
+  modId="fast_travel_waypoints"
+  version="${mod_version}"
+  displayName="Fast Travel Waypoints"
+  displayURL=""
+  logoFile="logo.png"
+  credits=""
+  authors="MacatMovie"
+  description='''
+  Adds fast travel to Waystones via Xaero's World Map instead of long, cluttered destination lists. Includes sound and visual effects, with behavior and conditions customizable in the config files.
+  '''
+
+[[dependencies.fast_travel_waypoints]]
+  modId="neoforge"
+  type="required"
+  versionRange="[21,)"
+  ordering="NONE"
+  side="BOTH"
+
+[[dependencies.fast_travel_waypoints]]
+  modId="minecraft"
+  type="required"
+  versionRange="[1.21,1.21.2)"
+  ordering="NONE"
+  side="BOTH"
+
+# Client-side required dependencies (Xaero integration)
+[[dependencies.fast_travel_waypoints]]
+  modId="xaerominimap"
+  type="required"
+  versionRange="[26.4.2,)"
+  ordering="NONE"
+  side="CLIENT"
+
+[[dependencies.fast_travel_waypoints]]
+  modId="xaeroworldmap"
+  type="required"
+  versionRange="[1.44.2,)"
+  ordering="NONE"
+  side="CLIENT"
+
+[[dependencies.fast_travel_waypoints]]
+  modId="xaerolib"
+  type="required"
+  versionRange="[1.7.1,)"
+  ordering="NONE"
+  side="CLIENT"
+
+# Required: Waystones provides the blocks/teleport targets and built-in Xaero waypoint integration.
+[[dependencies.fast_travel_waypoints]]
+  modId="waystones"
+  type="required"
+  versionRange="[21.1.37,)"
+  ordering="NONE"
+  side="BOTH"
+[[mixins]]
+config = "fast_travel_waypoints.mixins.json"

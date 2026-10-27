@@ -1,0 +1,7 @@
+/dist/
+/logs/
+/.gradle-user-home/
+**/.gradle/
+**/build/
+**/run/
+**/.idea/

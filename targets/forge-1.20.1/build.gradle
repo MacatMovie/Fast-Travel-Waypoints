@@ -1,0 +1,52 @@
+plugins {
+    id 'java-library'
+    id 'idea'
+    id 'net.neoforged.moddev.legacyforge' version '2.0.147'
+}
+
+version = mod_version
+group = mod_group_id
+base { archivesName = "Fast_Travel_Waypoints-Forge-${minecraft_version}" }
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+// Single authoritative implementation used by all supported targets.
+sourceSets {
+    main {
+        java.srcDir file('../../shared/common/java')
+        resources.srcDir file('../../shared/common/resources')
+    }
+}
+
+legacyForge {
+    enable {
+        forgeVersion = "${minecraft_version}-${forge_version}"
+        disableRecompilation = true
+    }
+    runs {
+        client { client() }
+        server { server(); programArgument '--nogui' }
+        configureEach { logLevel = org.slf4j.event.Level.INFO }
+    }
+    mods { "${mod_id}" { sourceSet(sourceSets.main) } }
+}
+
+dependencies {
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+mixin {
+    add sourceSets.main, "fast_travel_waypoints.refmap.json"
+    config "fast_travel_waypoints.mixins.json"
+}
+
+// Loader metadata is numeric; release JAR filename uses the v prefix.
+tasks.named('processResources', ProcessResources) {
+    inputs.property 'mod_version', mod_version
+    filesMatching('META-INF/mods.toml') { expand(mod_version: project.mod_version) }
+}
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+jar {
+    archiveFileName = "Fast_Travel_Waypoints-Forge-${minecraft_version}-v${mod_version}.jar"
+    manifest.attributes(['MixinConfigs': 'fast_travel_waypoints.mixins.json'])
+}
+idea { module { downloadSources = true; downloadJavadoc = true } }

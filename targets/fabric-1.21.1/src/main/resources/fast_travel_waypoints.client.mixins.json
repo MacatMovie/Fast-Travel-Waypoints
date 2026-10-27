@@ -1,0 +1,16 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.macat.waystonemap.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "AbstractContainerScreenAccessor",
+    "ScreenInitMixin",
+    "XaeroTeleportSafetyMixin",
+    "XaeroClientCommandSendMixin",
+    "TeleportSoundPacketMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

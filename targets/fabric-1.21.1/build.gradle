@@ -1,0 +1,61 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+    id 'maven-publish'
+}
+
+version = mod_version
+group = mod_group_id
+base { archivesName = "Fast_Travel_Waypoints-Fabric-${minecraft_version}" }
+
+repositories {
+    mavenCentral()
+    // Mod Menu is optional. We only need its API on the compilation classpath.
+    maven { url = 'https://maven.terraformersmc.com/releases/' }
+}
+
+loom {
+    splitEnvironmentSourceSets()
+    mods {
+        "fast_travel_waypoints" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+sourceSets {
+    main {
+        java.srcDir file('../../shared/common/java')
+        resources.srcDir file('../../shared/common/resources')
+    }
+    client {
+        java.srcDir file('../../shared/mc-1.21.1/client/java')
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+    // Optional Mod Menu config button. Not bundled and not required at runtime.
+    modCompileOnly "com.terraformersmc:modmenu:${modmenu_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand version: project.version }
+}
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+    withSourcesJar()
+}
+
+// Loom creates a dev JAR first and the remapped, distributable JAR second.
+// Only the latter is copied to dist/ by the batch build scripts.
+jar { archiveClassifier = 'dev' }
+remapJar { archiveFileName = "Fast_Travel_Waypoints-Fabric-${minecraft_version}-v${mod_version}.jar" }

@@ -1,0 +1,8 @@
+{
+  "waystone_teleport": {
+    "subtitle": "subtitles.fast_travel_waypoints.waystone_teleport",
+    "sounds": [
+      "fast_travel_waypoints:waystone_teleport"
+    ]
+  }
+}
